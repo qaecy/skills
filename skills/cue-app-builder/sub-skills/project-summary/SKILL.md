@@ -41,6 +41,22 @@ don't exist in the target project.
 CUE_API_KEY=<key> npx @qaecy/cue-cli app-builder-tools entity-summary-graph -s <projectId>
 ```
 
+### Focusing on a specific entity category
+
+Pass the `--entity` flag to restrict the graph to relationships involving a
+single entity category. The value can be either a full IRI or a prefixed one:
+
+```bash
+# Prefixed form
+CUE_API_KEY=<key> npx @qaecy/cue-cli app-builder-tools entity-summary-graph -s <projectId> --entity qcy-e:Contract
+
+# Full IRI form
+CUE_API_KEY=<key> npx @qaecy/cue-cli app-builder-tools entity-summary-graph -s <projectId> --entity https://dev.qaecy.com/enum#Contract
+```
+
+Use this to drill into one category once the full summary has shown you which
+categories exist.
+
 ## Output
 
 A markdown-formatted table of entity category relationships and their
