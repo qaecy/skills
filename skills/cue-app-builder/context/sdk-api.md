@@ -1,6 +1,6 @@
 # Cue SDK — API Quick Reference
 
-Version: `@qaecy/cue-sdk@0.0.16`
+Version: `@qaecy/cue-sdk@0.0.26`
 Exports: `@qaecy/cue-sdk` (browser / framework) · `@qaecy/cue-sdk/node` (Node.js)
 
 ---

@@ -83,7 +83,7 @@ bere-specifier mapping. Use the trailing-slash prefix to cover all subpaths
 <script type="importmap">
 {
   "imports": {
-    "@qaecy/cue-sdk": "https://esm.sh/@qaecy/cue-sdk@0.0.17",
+    "@qaecy/cue-sdk": "https://esm.sh/@qaecy/cue-sdk",
     "firebase/":      "https://esm.sh/firebase@12/"
   }
 }
