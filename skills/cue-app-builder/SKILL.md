@@ -64,8 +64,10 @@ Then clarify the remaining requirements if still ambiguous:
 - What data should the app display? (entities, documents, GIS, summaries?)
 - What user interaction is expected? (search, filter, click-to-detail, map?)
 - What stack? (vanilla JS SPA, React/Vue/Svelte, Node.js CLI/script, other?)
-- Auth model: interactive user login (SSO / email-password), or a server-side
-  service account using `CUE_API_KEY`?
+- Auth model: is this a Studio app meant to run embedded inside the Cue
+  portal (the default — use the `postMessage` handshake in Step 3), a
+  standalone app with interactive user login (SSO / email-password), or a
+  server-side service account using `CUE_API_KEY`?
 
 ---
 
@@ -123,7 +125,75 @@ environment — the SDK ships with a built-in Firebase config. Pass a custom
 
 ## Step 3 — Authentication
 
-### Interactive (user-facing app)
+**First decide which of these two modes applies — see "Auth model" in Step 1.**
+Studio apps (anything built via the Cue App Builder, or otherwise intended to
+run embedded inside the Cue portal) **must** use the portal handshake below.
+Never show an interactive login screen (`cue.auth.signIn()`) in a Studio app
+— the user is already signed in to the portal; showing a second login is a
+bug, not a fallback. The "Interactive"/"Redirect" flows further down are only
+for apps that run standalone, outside the portal (their own domain, a
+desktop app, etc.).
+
+### Studio apps embedded in the Cue portal (default for anything built here)
+
+The portal hosts every Studio app — shelf apps and apps built with this
+skill alike — inside an iframe and performs a `postMessage` handshake to
+hand it an authenticated session, instead of making the app show its own
+login UI:
+
+```js
+// 1. Signal readiness as soon as the script runs.
+window.parent.postMessage({ type: 'cue:ready' }, '*');
+
+// 2. Wait for the portal's response.
+window.addEventListener('message', (event) => {
+  if (event.data?.type !== 'cue:init') return;
+  bootstrap(event.data);
+});
+
+async function bootstrap({ firebaseConfig, projectId, appId, customToken }) {
+  const cue = new Cue(firebaseConfig);
+
+  // The preview/runtime iframe is sandboxed (opaque origin, no shared
+  // storage), so sign in with the short-lived custom token the portal
+  // minted for the current user rather than waiting on a restored session.
+  await cue.auth.signInWithCustomToken(customToken);
+
+  // `projectId` is always provided — use it for every SDK call that takes one.
+
+  // `appId` is only present once the app has been saved to the Studio
+  // registry (the platform assigns and injects it — never hardcode your
+  // own UUID here, unlike the standalone-app appData pattern in Step 9).
+  // While still iterating on a fresh, unsaved build, `appId` is undefined —
+  // skip `cue.api.appData` persistence gracefully in that case instead of
+  // throwing.
+
+  // ...render the app, reveal it, hide any loading/connecting overlay...
+}
+```
+
+Notes:
+- Do this unconditionally at startup — don't gate it behind a "sign in"
+  button or check `cue.auth.currentUser` first.
+- `doc-search`/`sparql-client` (checked into
+  `apps/frontend/cue-portal/public/studio-apps/`) show a related but distinct
+  variant of this same handshake: they're hand-authored, first-party files
+  served *same-origin* with the portal, so they skip the token and instead
+  wait on `cue.auth.onAuthStateChanged` to pick up the session Firebase
+  already persisted in shared storage. Apps built by this skill always run
+  in a sandboxed, opaque-origin iframe (both while previewing in the builder
+  and once saved and run from the Studio gallery), so the `customToken`
+  path above is the one that applies — read those two files for the rest of
+  the bootstrap shape (search-bar/list/viewer wiring, the auth-overlay
+  loading pattern), not for their auth mechanism specifically. If reachable,
+  the same two apps are also live at `https://cue.qaecy.com/studio-apps/doc-search/index.html`
+  and `.../sparql-client/index.html` — useful to skim for UI/UX conventions,
+  but the checked-in source is the source of truth if that URL is ever
+  unreachable or out of date.
+- Keep the `#auth-overlay` / connecting-spinner pattern from those files
+  while waiting for `cue:init` and for `signInWithCustomToken` to resolve.
+
+### Interactive (user-facing app, standalone only)
 
 ```ts
 // SSO (Google or Microsoft)
@@ -300,13 +370,52 @@ cue.gis.onFeaturesChange(featuresMap => {
 
 ---
 
-## Step 9 — App structure guidance
+## Step 9 — Persisting per-user app data
+
+If your app needs to remember something for the current user across sessions —
+settings, a language/theme preference, a list of saved/favorited items — use
+`cue.api.appData` instead of inventing your own storage. It's small-blob
+storage only (**100KB cap, enforced server-side**), not for documents, datasets,
+or anything project-scoped; use `cue.projects.documents`/sync for bulk data.
+
+**Studio apps embedded in the portal (Step 3 default):** don't hardcode a
+UUID — use the `appId` the portal handshake hands you in `cue:init`. It's
+`undefined` until the app is saved to the Studio registry (the platform
+assigns it then), so skip `appData` calls gracefully until it's present:
+
+```ts
+if (appId) {
+  const settings = await cue.api.appData.get<MySettings>(appId); // null if nothing saved yet
+  await cue.api.appData.set(appId, { ...settings, favorites: [...] });
+}
+```
+
+**Standalone apps (not embedded in the portal):** generate a UUID4 **once**
+and hardcode it as a constant in your app — this namespaces your app's data
+from every other Cue app sharing the platform. Never change it after
+release, or you'll orphan any data already saved.
+
+```ts
+const APP_ID = '3fa2b1c0-58cc-4372-a567-0e02b2c3d479'; // generate once, hardcode, never change
+
+const settings = await cue.api.appData.get<MySettings>(APP_ID); // null if nothing saved yet
+await cue.api.appData.set(APP_ID, { ...settings, favorites: [...] });
+```
+
+See `context/sdk-api.md` for the full reference.
+
+---
+
+## Step 10 — App structure guidance
 
 ### Vanilla JS SPA (recommended starting point)
 
 - One `index.html` + `app.js` + `styles.css`.
 - Use the `importmap` pattern (Step 2) to avoid a build step.
-- Auth state drives all UI transitions via `onAuthStateChanged`.
+- For Studio apps, complete the Step 3 `cue:ready`/`cue:init` handshake
+  before rendering anything; `onAuthStateChanged` still fires afterwards and
+  can drive further UI transitions, but never gate initial render on an
+  interactive sign-in screen.
 - Keep a single `activeProject` state variable; reload data on project change.
 - **Mandatory: include `<cue-by-cue-logo>` in every app** (header, footer, or splash).
 - **Use built-in Cue components** — do not build custom entity list or viewer

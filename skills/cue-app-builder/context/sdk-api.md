@@ -105,6 +105,35 @@ const rows = result.results.bindings.map(b =>
 
 ---
 
+## `cue.api.appData` — CueAppData
+
+Per-app, per-user data storage — for small settings/preferences/saved-item lists,
+not bulk data. Each app gets its own file, namespaced by a UUID4 the app
+hardcodes for itself, so two apps can never collide.
+
+| Method | Signature | Notes |
+|---|---|---|
+| `get` | `<T>(appId: string) → Promise<T \| null>` | `null` if nothing saved yet |
+| `set` | `(appId: string, data: unknown) → Promise<void>` | Overwrites; **100KB max**, enforced server-side |
+
+**Usage:**
+```ts
+// Generate ONCE (e.g. `node -e "console.log(crypto.randomUUID())"`) and hardcode
+// it as a constant in your app — this is what namespaces your data from every
+// other Cue app. Never change it after release, or you'll orphan existing data.
+const APP_ID = '3fa2b1c0-...'; // your app's UUID4
+
+const settings = await cue.api.appData.get<{ theme?: string }>(APP_ID);
+await cue.api.appData.set(APP_ID, { ...settings, theme: 'dark' });
+```
+
+Scoped to the current authenticated user only — there is no project context, so
+it works the same regardless of which project is active. Requests larger than
+100KB are rejected with a 400; keep it to small config blobs, not documents or
+datasets (use `cue.projects.documents`/sync for those).
+
+---
+
 ## `CueProjectEntities` — accessed via SPARQL or future `cue.projects.entities(id)`
 
 | Method | Signature | Notes |
