@@ -75,31 +75,29 @@ Then clarify the remaining requirements if still ambiguous:
 
 **Load `context/sdk-api.md` now** to have the full API at hand.
 
-### Browser / vanilla JS (importmap pattern)
+### Browser / vanilla JS (no build step)
 
-The SDK has firebase as a peer dependency, so firebase must be available as a
-bere-specifier mapping. Use the trailing-slash prefix to cover all subpaths
-(`firebase/app`, `firebase/auth`, `firebase/storage`, etc.) in one entry:
+Import directly from jsdelivr's dedicated `/browser.js` entry point — the
+same pattern the first-party `doc-search`/`sparql-client` Studio apps use in
+production (`apps/frontend/cue-portal/public/studio-apps/`). Omit the version
+to always get the latest release — don't guess a version number.
 
 ```html
-<script type="importmap">
-{
-  "imports": {
-    "@qaecy/cue-sdk": "https://esm.sh/@qaecy/cue-sdk",
-    "firebase/":      "https://esm.sh/firebase@12/"
-  }
-}
-</script>
 <script type="module">
-  import { Cue } from '@qaecy/cue-sdk';
+  import { Cue } from 'https://cdn.jsdelivr.net/npm/@qaecy/cue-sdk/browser.js';
   const cue = new Cue();   // uses built-in default SDK config
   // ...
 </script>
 ```
 
-> **Note:** Do NOT use `?external=firebase` on the esm.sh SDK URL, and do not
-> list individual `firebase/app`, `firebase/auth`, … entries. The single
-> trailing-slash rule `"firebase/": "…"` handles every subpath.
+> **Do NOT** use an importmap + esm.sh bare-specifier setup
+> (`"@qaecy/cue-sdk": "https://esm.sh/@qaecy/cue-sdk"` remapped alongside a
+> `"firebase/": "https://esm.sh/firebase@12/"` entry for the peer
+> dependency). That combination is unreliable — it 404s at runtime, which
+> silently kills the whole module (including the `cue:ready` postMessage
+> in Step 3) since it's a static `import`, leaving the app stuck on its
+> "Connecting to Cue…" overlay forever. The `/browser.js` entry above has no
+> peer-dependency resolution problem and needs no importmap at all.
 
 ### npm-based (React, Vue, Svelte, Node.js)
 
@@ -421,6 +419,13 @@ See `context/sdk-api.md` for the full reference.
 - **Use built-in Cue components** — do not build custom entity list or viewer
   UIs. Always use `<cue-entity-list>` and `<cue-entity-viewer>`. Load
   `sub-skills/web-components/SKILL.md` for full usage details.
+- **Build general app chrome from the `cue-base-*` primitives** — cards
+  (`cue-base-card`), buttons (`cue-base-button` + its label/icon/padder
+  helpers), form fields (`cue-base-input`, `cue-base-select`, …), typography
+  (`cue-base-typography`), tables (`cue-base-table`), and layout
+  (`cue-base-flexcontainer`) — instead of hand-rolled `<div>`/`<button>`/CSS.
+  Load `sub-skills/web-components/SKILL.md` for the full list and usage
+  snippets. This is what keeps every Studio app visually consistent with Cue.
 - Unless the user explicitly requests a different design system/theme, use the
   default Cue visual language: default Cue colors and Cue component styling.
 
