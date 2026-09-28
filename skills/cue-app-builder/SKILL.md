@@ -66,7 +66,9 @@ Then clarify the remaining requirements if still ambiguous:
 - What stack? (vanilla JS SPA, React/Vue/Svelte, Node.js CLI/script, other?)
 - Auth model: is this a Studio app meant to run embedded inside the Cue
   portal (the default — use the `postMessage` handshake in Step 3), a
-  standalone app with interactive user login (SSO / email-password), or a
+  standalone app with interactive user login (SSO / email-password), **both**
+  (one codebase built into a portal version and a standalone version — see
+  "Building one app for both the portal and standalone" in Step 3), or a
   server-side service account using `CUE_API_KEY`?
 
 ---
@@ -190,6 +192,82 @@ Notes:
   unreachable or out of date.
 - Keep the `#auth-overlay` / connecting-spinner pattern from those files
   while waiting for `cue:init` and for `signInWithCustomToken` to resolve.
+- Only accept `cue:init` from the parent: `if (event.source !== window.parent) return;`.
+
+### Packaging constraints for the portal
+
+The portal stores a custom Studio app as **one HTML string** and runs it via
+`srcdoc` in an `<iframe sandbox="allow-scripts">`. That has hard consequences:
+
+- **Deliver a single self-contained HTML file.** There is no base URL, so any
+  relative reference (`<script src="app.js">`, `<link href="styles.css">`,
+  `import './queries.js'`) 404s. Inline your own JS and CSS. Absolute CDN URLs
+  (the SDK's `/browser.js`, `@qaecy/cue-ui`'s `index.js`/`styles.css`) are fine.
+- **No app chrome.** The portal already shows a bar with the app name, a back
+  button and the connection status. Don't add your own top bar, user e-mail,
+  sign-out button or login screen. Put `<cue-by-cue-logo>` somewhere
+  unobtrusive instead (e.g. at the end of the tab row or in a footer).
+- **Don't hardcode the project.** Use the `projectId` from `cue:init`; the
+  portal passes whichever project the user has selected. If your queries embed
+  the project id (e.g. a `PREFIX cat: <https://cue.qaecy.com/e/{projectId}/>`),
+  build them from that value.
+- **Opaque origin.** `localStorage`, `sessionStorage`, IndexedDB and cookies
+  throw or don't persist. Use `cue.api.appData` (Step 9) for anything that must
+  survive a reload.
+- **Blocked by the sandbox:** file downloads (`<a download>`, blob URLs — e.g.
+  "Export CSV"), `target="_blank"` links and `window.open`, top-level
+  navigation, `alert`/`confirm`/`prompt`. Don't rely on them in the portal
+  version; offer copy-to-clipboard or an in-app view instead, or keep the
+  feature standalone-only.
+
+### Building one app for both the portal and standalone
+
+When the user wants the same app both embedded in the portal and hosted on its
+own (e.g. a customer-facing version with its own login), don't fork the code.
+Split it into a host-agnostic core and one small entry per host:
+
+```
+my-app/
+  cue-app.json          { "name", "description", "icon", "tone" } for the Studio record
+  index.html            page shell; host-only markup in target blocks (below)
+  styles.css
+  src/
+    app.js              export async function start({ cue, projectId }) { … }
+    host-portal.js      cue:ready / cue:init handshake → start({ cue, projectId })
+    host-standalone.js  sign-in UI + onAuthStateChanged → start({ cue, projectId: FIXED_ID })
+```
+
+- `app.js` never creates a `Cue` instance or signs in; it receives a
+  signed-in `cue` and a `projectId` and renders into `#app`.
+- Host-only markup (top bar + login for standalone, connecting overlay for
+  the portal) goes in comment blocks that the build keeps for one target and
+  strips for the other:
+
+  ```html
+  <!-- target:standalone -->
+  <header class="topbar">…</header>
+  <section id="loginScreen" hidden>…</section>
+  <!-- /target:standalone -->
+
+  <!-- target:portal -->
+  <div id="connecting" class="connecting"><div class="spinner"></div>Connecting to Cue…</div>
+  <!-- /target:portal -->
+
+  <main id="app" hidden>…</main>
+
+  <script type="module" data-cue-entry></script>  <!-- bundle of src/host-<target>.js goes here -->
+  ```
+
+- The build bundles `src/host-<target>.js` (esbuild, `https://*` imports kept
+  external), inlines it and the local stylesheets, and writes one file per
+  target: `portal.html` (upload this to the portal) and `standalone.html`.
+
+In the QAECY monorepo this workspace already exists at
+`apps/frontend/cue-studio/` — put the app in its own folder there and build
+with `node apps/frontend/cue-studio/build.mjs <app>`; see its `README.md`
+(`fzag-files` is a worked example). Outside the monorepo, reproduce the same
+layout with a small esbuild script, or — for a single-target portal app —
+simply write everything inline in one `index.html`.
 
 ### Interactive (user-facing app, standalone only)
 
@@ -408,8 +486,11 @@ See `context/sdk-api.md` for the full reference.
 
 ### Vanilla JS SPA (recommended starting point)
 
-- One `index.html` + `app.js` + `styles.css`.
-- Use the `importmap` pattern (Step 2) to avoid a build step.
+- One `index.html` + `app.js` + `styles.css` while developing — but a
+  portal app must ship as **one self-contained `index.html`** with JS and CSS
+  inlined (see "Packaging constraints for the portal" in Step 3).
+- Import the SDK from the jsdelivr `/browser.js` entry (Step 2) to avoid a
+  build step. No importmap.
 - For Studio apps, complete the Step 3 `cue:ready`/`cue:init` handshake
   before rendering anything; `onAuthStateChanged` still fires afterwards and
   can drive further UI transitions, but never gate initial render on an
